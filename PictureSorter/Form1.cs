@@ -1,6 +1,7 @@
 
 using System.Net;
 using System.Text;
+using System.Windows.Forms.Design;
 using Newtonsoft.Json;
 using TwoCaptcha.Captcha;
 
@@ -11,14 +12,15 @@ namespace PictureSorter
 {
     public partial class Form1 : Form
     {
-        private HttpWebResponse r;
-
+        //private HttpWebResponse r;
+        private int Count = 0;
+        private int FilesCount = 0;
         private string FolderPath;
         private string publishFolderPath;
 
         List<int> upscale_x_folders = new List<int>();
 
-        long timeDelay = 300*24*60*60;
+        long timeDelay = 300 * 24 * 60 * 60;
         string owner_id = "-218097297"; //-147923159 -218097297
         string token = "vk1.a.eK7Lv8psNLeBO3D0qhPt5df_id5OuJfLLgPQ1w5-B9QXNg0LkE3qJ8AuuoOB49IWqI8d-PBoRRdrYPinWLCbBswIvRlqWa_eRUw6nOn5yyVZyaChnUhl_WX0tcaaJeJTHwVZxfRwb8cHIM1HKI3LCoORPdqmJ9vyamdW0wtGml5BeGRM5IRqNIZapjuea2CJfrxcTiBP2glnW2bDDfroQQ";
         string API_KEY = "b62aa90fc9386229fe9f662cff3c393e";
@@ -34,7 +36,7 @@ namespace PictureSorter
             textBox10.Text = owner_id;
             textBox11.Text = (timeDelay / 24 / 60 / 60).ToString();
         }
-
+        #region выбор директорий и сортировка файлов
         private void button1_Click(object sender, EventArgs e)
         {
             using (var fbd = new FolderBrowserDialog())
@@ -103,8 +105,8 @@ namespace PictureSorter
             }
 
         }
-
-        private void button3_Click(object sender, EventArgs e)
+        #endregion
+        private async void button3_Click(object sender, EventArgs e)
         {
             if (publishFolderPath != string.Empty)
             {
@@ -114,27 +116,39 @@ namespace PictureSorter
                 Files = Files.Concat(d.GetFiles("*.jpeg")).ToArray();
                 Files = Files.Concat(d.GetFiles("*.gif")).ToArray();
 
-                int count = 0;
+                FilesCount = Files.Length;
+                Count = 0;
                 foreach (var file in Files)
                 {
                     try
                     {
                         string filePath = file.FullName;
                         string fileName = file.Name;
-                        ParseFile(filePath, fileName);
-                       
+                        //AsyncPasreFile(filePath, fileName);
+                        object args = new object[2] { filePath, fileName };
+                        Thread thread = new Thread(new ParameterizedThreadStart(AsyncPasreFile));
+                        thread.Start(args);
+                        await Task.Delay(2000);
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show((count + 1).ToString() + " - Ошибка\n" + ex.Message.ToString());
+                        listBox1.Items.Add("ERROR:   "+file.Name+ " " + ex.Message);
+                        listBox1.TopIndex = listBox1.Items.Count - 1;
                     }
-                    count += 1;
-                    textBox7.Text = count + "/" + Files.Length.ToString();
                 }
             }
-            MessageBox.Show("Done");
         }
 
+        private async void AsyncPasreFile(object args)
+        {
+            Array argArray = new object[2];
+            argArray = (Array)args;
+            string filePath = (string)argArray.GetValue(0);
+            string fileName = (string)argArray.GetValue(1);
+            listBox1.Invoke(() => { listBox1.Items.Add("TRY TO PARSE   " + fileName); listBox1.TopIndex = listBox1.Items.Count - 1; });
+            await Task.Run(() => { ParseFile(filePath, fileName); });
+        }
+        #region отбор файлов
         private void button4_Click(object sender, EventArgs e)
         {
             using (var fbd = new FolderBrowserDialog())
@@ -154,20 +168,20 @@ namespace PictureSorter
                 }
             }
         }
+        #endregion
 
+        #region перевод ответа в строку
         private string ConvertResponseToString(HttpWebResponse response)
         {
             string s;
-            using(StreamReader sr = new StreamReader(response.GetResponseStream()))
+            using (StreamReader sr = new StreamReader(response.GetResponseStream()))
             {
                 s = sr.ReadToEnd();
             }
             return s;
         }
-
-
-
-        private HttpWebResponse AskForUpload()
+        #endregion
+        private HttpWebResponse AskForUpload(string token)
         {
             string url = "https://api.vk.com/method/docs.getUploadServer?access_token=" + token + "&v=5.89";
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
@@ -175,29 +189,23 @@ namespace PictureSorter
             return response;
         }
 
-        private async void ParseFile(string filePath, string fileName)
+        private async Task ParseFile(string filePath, string fileName)
         {
-
-            var response = AskForUpload();
-
+            var response = AskForUpload(token);
             string s = ConvertResponseToString(response);
-
-
             AskFileUploadResponse askFileUploadResponse = JsonConvert.DeserializeObject<AskFileUploadResponse>(s);
 
             FileUploadResponse fileUploadResponse = new FileUploadResponse();
-
             try
             {
                 var wc = new WebClient();
                 s = Encoding.ASCII.GetString(wc.UploadFile(askFileUploadResponse.Response.upload_url, filePath));
                 fileUploadResponse = JsonConvert.DeserializeObject<FileUploadResponse>(s);
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
-
+                listBox1.Invoke(() => { listBox1.Items.Add("ERROR:   "+ fileName+ " " + ex.Message); listBox1.TopIndex = listBox1.Items.Count - 1; });
             }
-
 
             var url = "https://api.vk.com/method/docs.save?file=" + fileUploadResponse.file + "&title=" + fileName + "&return_tags=0&access_token=" + token + "&v=5.89";
             var request = (HttpWebRequest)WebRequest.Create(url);
@@ -207,26 +215,21 @@ namespace PictureSorter
                 s = sr.ReadToEnd();
             }
 
-
-
             if (s.IndexOf("Captcha") != -1)
             {
                 ErrorResponse errorResponse = JsonConvert.DeserializeObject<ErrorResponse>(s);
-                CaptchaResolve(errorResponse.error, fileUploadResponse, fileName);
-                response = r;
+                response = await CaptchaResolve(errorResponse.error, fileUploadResponse, fileName);
+                
                 using (StreamReader sr = new StreamReader(response.GetResponseStream()))
                 {
                     s = sr.ReadToEnd();
                 }
             }
-
-
-
+            listBox1.Invoke(() => { listBox1.Items.Add("SUCCESFULLY UPLOADED TO DOCUMENTS   "+fileName); listBox1.TopIndex = listBox1.Items.Count - 1; });
 
             FileSaveResponse fileSaveResponse = JsonConvert.DeserializeObject<FileSaveResponse>(s);
             DateTimeOffset dto = new DateTimeOffset(DateTime.UtcNow);
             string time = (dto.ToUnixTimeSeconds() + timeDelay).ToString();
-            //string time = (DateTimeOffset.ToUnixTimeSeconds() + timeDelay).ToString();
             url = "https://api.vk.com/method/wall.post?owner_id=" + owner_id + "&friends_only=0&from_group=0&message=" + fileSaveResponse.response[0].title + "&attachments=doc" + fileSaveResponse.response[0].owner_id.ToString() + "_" + fileSaveResponse.response[0].id.ToString() + "&signed=0&publish_date=" + time + "&mark_as_ads=0&close_comments=0&mute_notifications=0&access_token=" + token + "&v=5.89";
             request = (HttpWebRequest)WebRequest.Create(url);
             response = (HttpWebResponse)request.GetResponse();
@@ -234,40 +237,71 @@ namespace PictureSorter
             {
                 s = sr.ReadToEnd();
             }
+            listBox1.Invoke(() => { listBox1.Items.Add("POSTED   "+ fileName); listBox1.TopIndex = listBox1.Items.Count - 1; });
+            Count++;
+            textBox7.Invoke(() => { textBox7.Text = Count.ToString() + "/" + FilesCount.ToString(); });   
         }
 
-        private void CaptchaResolve(CaptchaResponse captchaResponse, FileUploadResponse fileUploadResponse, string fileName)
+        private async Task<string> CaptchaResolve(CaptchaResponse captchaResponse)
         {
             using (var client = new WebClient())
             {
-                client.DownloadFile(captchaResponse.captcha_img, publishFolderPath + "\\captcha.jpg");
+                client.DownloadFile(captchaResponse.captcha_img, publishFolderPath + "\\" + captchaResponse.captcha_sid + ".jpg");
             }
 
             var solver = new TwoCaptcha.TwoCaptcha(API_KEY);
             Normal captcha = new Normal();
-            captcha.SetFile(publishFolderPath + "\\captcha.jpg");
+            captcha.SetFile(publishFolderPath + "\\" + captchaResponse.captcha_sid + ".jpg");
+            string code = "";
             try
             {
-                Task t = new Task(() => { solver.Solve(captcha).Wait(); });
-                t.Start();
-                t.Wait();
-                t.Dispose();
-                //MessageBox.Show("Captcha solved: " + captcha.Code);
+                string captchaID = await solver.Send(captcha);
+                await Task.Delay(20 * 1000);
+                code = await solver.GetResult(captchaID);
             }
             catch (AggregateException e)
             {
-                MessageBox.Show("Error occurred: " + e.InnerExceptions.First().Message);
+                listBox1.Invoke(() => { listBox1.Items.Add("Capthca FAILURED"); listBox1.TopIndex = listBox1.Items.Count - 1; });
             }
-            File.Delete(publishFolderPath + "\\captcha.jpg");
+            File.Delete(publishFolderPath + "\\" + captchaResponse.captcha_sid + ".jpg");
+            return code;
+        } // решение капчи с возвратом кода
 
-            string url = "https://api.vk.com/method/docs.save?file=" + fileUploadResponse.file + "&title=" + fileName + "&return_tags=0&captcha_sid=" + captchaResponse.captcha_sid + "&captcha_key=" + captcha.Code + "&access_token=" + token + "&v=5.89";
+        #region решение капчи с запросом
+        private async Task<HttpWebResponse> CaptchaResolve(CaptchaResponse captchaResponse, FileUploadResponse fileUploadResponse, string fileName)
+        {
+            listBox1.Invoke(() => { listBox1.Items.Add("CAPTCHA REQUIRED   " + fileName); listBox1.TopIndex = listBox1.Items.Count - 1; });
+            using (var client = new WebClient())
+            {
+                client.DownloadFile(captchaResponse.captcha_img, publishFolderPath + "\\" + captchaResponse.captcha_sid + ".jpg");
+            }
+
+            var solver = new TwoCaptcha.TwoCaptcha(API_KEY);
+            Normal captcha = new Normal();
+            captcha.SetFile(publishFolderPath + "\\" + captchaResponse.captcha_sid + ".jpg");
+            string code = "";
+            try
+            {
+                string captchaID = await solver.Send(captcha);
+                await Task.Delay(20 * 1000);
+                code = await solver.GetResult(captchaID);
+                if (code != null) listBox1.Invoke(() => { listBox1.Items.Add("CAPTCHA RESOLVED:   " + code); listBox1.TopIndex = listBox1.Items.Count - 1; });
+            }
+            catch (AggregateException e)
+            {
+                listBox1.Invoke(() => { listBox1.Items.Add("CAPTCHA FAILED   "+ fileName); listBox1.TopIndex = listBox1.Items.Count - 1; });
+            }
+            File.Delete(publishFolderPath + "\\" + captchaResponse.captcha_sid + ".jpg");
+
+            string url = "https://api.vk.com/method/docs.save?file=" + fileUploadResponse.file + "&title=" + fileName + "&return_tags=0&captcha_sid=" + captchaResponse.captcha_sid + "&captcha_key=" + code + "&access_token=" + token + "&v=5.89";
             var request = (HttpWebRequest)WebRequest.Create(url);
-            r =  (HttpWebResponse)request.GetResponse();
+            return (HttpWebResponse)request.GetResponse();
         }
-
+        #endregion
+        #region Обновление настроек
         private void button5_Click_1(object sender, EventArgs e)
         {
-            if(textBox8.Text!=String.Empty) token = textBox8.Text;
+            if (textBox8.Text != String.Empty) token = textBox8.Text;
             if (textBox9.Text != String.Empty) API_KEY = textBox9.Text;
             if (textBox10.Text != String.Empty) owner_id = textBox10.Text;
 
@@ -287,5 +321,6 @@ namespace PictureSorter
                 }
             }
         }
+        #endregion 
     }
 }
