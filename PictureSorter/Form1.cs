@@ -230,7 +230,7 @@ namespace PictureSorter
             FileSaveResponse fileSaveResponse = JsonConvert.DeserializeObject<FileSaveResponse>(s);
             DateTimeOffset dto = new DateTimeOffset(DateTime.UtcNow);
             string time = (dto.ToUnixTimeSeconds() + timeDelay).ToString();
-            url = "https://api.vk.com/method/wall.post?owner_id=" + owner_id + "&friends_only=0&from_group=0&message=" + fileSaveResponse.response[0].title + "&attachments=doc" + fileSaveResponse.response[0].owner_id.ToString() + "_" + fileSaveResponse.response[0].id.ToString() + "&signed=0&publish_date=" + time + "&mark_as_ads=0&close_comments=0&mute_notifications=0&access_token=" + token + "&v=5.89";
+            url = "https://api.vk.com/method/wall.post?owner_id=" + owner_id + "&friends_only=0&from_group=0&message=" + "Ђ ї Ч\r\n\r\n~~~~\r\nХ ’удожник: " + (fileSaveResponse.response[0].title).Substring(0, fileSaveResponse.response[0].title.IndexOf(".")) + "\r\n~~~~" + "&attachments=doc" + fileSaveResponse.response[0].owner_id.ToString() + "_" + fileSaveResponse.response[0].id.ToString() + "&signed=0&publish_date=" + time + "&mark_as_ads=0&close_comments=0&mute_notifications=0&access_token=" + token + "&v=5.89";
             request = (HttpWebRequest)WebRequest.Create(url);
             response = (HttpWebResponse)request.GetResponse();
             using (StreamReader sr = new StreamReader(response.GetResponseStream()))
